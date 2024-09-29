@@ -3,6 +3,7 @@
 import sqlite3
 import threading
 import logging
+import dateutil.parser
 
 DB_NAME = 'listings.db'
 db_lock = threading.Lock()
@@ -34,6 +35,27 @@ def init_db():
                     FOREIGN KEY(user_id) REFERENCES users(user_id)
                 )
             ''')
+            # Add the new listings table
+            c.execute('''
+                    CREATE TABLE IF NOT EXISTS listings (
+                        id TEXT PRIMARY KEY,
+                        title TEXT,
+                        url TEXT,
+                        price TEXT,
+                        rent_additional TEXT,
+                        location TEXT,
+                        region_id TEXT,
+                        region_name TEXT,
+                        region_normalized_name TEXT,
+                        district_id TEXT,
+                        district_name TEXT,
+                        area TEXT,
+                        rooms TEXT,
+                        is_business INTEGER,
+                        description TEXT,
+                        listing_time TIMESTAMP
+                    )
+                ''')
             conn.commit()
         except sqlite3.Error as e:
             logger.error(f"Database error during initialization: {e}")
@@ -143,15 +165,15 @@ def mark_listing_as_sent(user_id, listing_id):
         finally:
             conn.close()
 
-def clean_old_sent_listings():
+def clean_old_listings():
     with db_lock:
         try:
             conn = sqlite3.connect(DB_NAME)
             c = conn.cursor()
-            c.execute('DELETE FROM sent_listings WHERE sent_at < datetime("now", "-2 days")')
+            c.execute('DELETE FROM listings WHERE listing_time < datetime("now", "-2 days")')
             conn.commit()
         except sqlite3.Error as e:
-            logger.error(f"Database error when cleaning old sent listings: {e}")
+            logger.error(f"Database error when cleaning old listings: {e}")
         finally:
             conn.close()
 
@@ -177,6 +199,66 @@ def get_active_users():
             return [row[0] for row in result]
         except sqlite3.Error as e:
             logger.error(f"Database error when fetching active users: {e}")
+            return []
+        finally:
+            conn.close()
+
+def save_listings_to_db(listings):
+    with db_lock:
+        try:
+            conn = sqlite3.connect(DB_NAME)
+            c = conn.cursor()
+            for listing in listings:
+                c.execute('''
+                    INSERT OR REPLACE INTO listings (
+                        id, title, url, price, rent_additional, location,
+                        region_id, region_name, region_normalized_name,
+                        district_id, district_name, area, rooms,
+                        is_business, description, listing_time
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ''', (
+                    listing.get('id'),
+                    listing.get('title'),
+                    listing.get('url'),
+                    listing.get('price'),
+                    listing.get('rent_additional'),
+                    listing.get('location'),
+                    listing.get('region_id'),
+                    listing.get('region_name'),
+                    listing.get('region_normalized_name'),
+                    listing.get('district_id'),
+                    listing.get('district_name'),
+                    listing.get('area'),
+                    listing.get('rooms'),
+                    int(listing.get('is_business', False)),
+                    listing.get('description'),
+                    listing.get('listing_time').isoformat() if listing.get('listing_time') else None
+                ))
+            conn.commit()
+        except sqlite3.Error as e:
+            logger.error(f"Database error when saving listings: {e}")
+        finally:
+            conn.close()
+
+def get_listings_from_db():
+    with db_lock:
+        try:
+            conn = sqlite3.connect(DB_NAME)
+            conn.row_factory = sqlite3.Row
+            c = conn.cursor()
+            c.execute('SELECT * FROM listings WHERE listing_time > datetime("now", "-2 days")')
+            rows = c.fetchall()
+            listings = []
+            for row in rows:
+                listing = dict(row)
+                listing['is_business'] = bool(listing['is_business'])
+                # Parse listing_time back to datetime object
+                if listing.get('listing_time'):
+                    listing['listing_time'] = dateutil.parser.parse(listing['listing_time'])
+                listings.append(listing)
+            return listings
+        except sqlite3.Error as e:
+            logger.error(f"Database error when fetching listings: {e}")
             return []
         finally:
             conn.close()

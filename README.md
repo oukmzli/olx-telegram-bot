@@ -1,14 +1,3 @@
-olx-telegram-bot/
-├── bot.py
-├── db.py
-├── olx_scraper.py
-├── districts.py
-├── requirements.txt
-├── .gitignore
-├── Dockerfile
-├── .env (not included in version control)
-└── README.md
-
 # OLX Telegram Bot
 
 This bot monitors OLX for new apartment listings in Krakow and notifies users via Telegram. It now uses the OLX API for data retrieval and includes enhanced features for a better user experience.
@@ -40,7 +29,7 @@ This bot monitors OLX for new apartment listings in Krakow and notifies users vi
 1. **Clone the repository:**
 
    ```bash
-   git clone https://github.com/yourusername/olx-telegram-bot.git
+   git clone https://github.com/oukmzli/olx-telegram-bot.git
    cd olx-telegram-bot
    ```
 
@@ -81,3 +70,17 @@ This bot monitors OLX for new apartment listings in Krakow and notifies users vi
    ```
    Replace /path/on/host/listings.db with the actual path on your host machine where you want to store the database.
 
+   Ensure that when running the Docker container, you pass the TELEGRAM_BOT_TOKEN via the --env flag as per your instructions.
+
+
+
+olx-telegram-bot/
+├── bot.py
+├── db.py
+├── olx_scraper.py
+├── districts.py
+├── requirements.txt
+├── .gitignore
+├── Dockerfile
+├── .env (not included in version control)
+└── README.md

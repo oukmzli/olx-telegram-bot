@@ -9,13 +9,18 @@ from telegram.ext import (
     ApplicationBuilder, CommandHandler, ContextTypes, ConversationHandler, MessageHandler, CallbackQueryHandler, filters
 )
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-from db import init_db, get_user_filters, set_user_filters, reset_user_filters
-from db import has_user_received_listing, mark_listing_as_sent, set_user_active, get_active_users
+from db import (
+    init_db, get_user_filters, set_user_filters, reset_user_filters,
+    has_user_received_listing, mark_listing_as_sent, set_user_active,
+    get_active_users, save_listings_to_db, get_listings_from_db,
+    clean_old_listings
+)
 from olx_api import fetch_listings, fetch_districts
 from telegram.helpers import escape_markdown
 import difflib
 from bs4 import BeautifulSoup
 from unidecode import unidecode
+import datetime
 
 load_dotenv()
 TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
@@ -370,14 +375,14 @@ def filter_listings_for_user(listings, filters):
 async def global_check_new_listings(context: ContextTypes.DEFAULT_TYPE):
     try:
         active_user_ids = get_active_users()
-        if not active_user_ids:
-            return
-
         # Fetch listings once
         listings = fetch_listings({})
         if not listings:
             logger.info("No new listings found.")
             return
+
+        # Save fetched listings to the database
+        save_listings_to_db(listings)
 
         for user_id in active_user_ids:
             filters = get_user_filters(user_id)
@@ -393,6 +398,7 @@ async def global_check_new_listings(context: ContextTypes.DEFAULT_TYPE):
                     mark_listing_as_sent(user_id, listing_id)
     except Exception as e:
         logger.error(f"Error in global_check_new_listings: {e}")
+
 
 
 async def start_search(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -413,10 +419,10 @@ async def send_accumulated_listings(context: ContextTypes.DEFAULT_TYPE, user_id:
         if filters is None:
             return
 
-        # Fetch listings
-        listings = fetch_listings({})
+        # Fetch listings from the database
+        listings = get_listings_from_db()
         if not listings:
-            logger.info("No listings found.")
+            logger.info("No listings found in the database.")
             return
 
         user_listings = filter_listings_for_user(listings, filters)
@@ -426,6 +432,7 @@ async def send_accumulated_listings(context: ContextTypes.DEFAULT_TYPE, user_id:
             if not has_user_received_listing(user_id, listing_id):
                 await send_listing(context, user_id, listing)
                 mark_listing_as_sent(user_id, listing_id)
+                await asyncio.sleep(1)
     except Exception as e:
         logger.error(f"Error in send_accumulated_listings: {e}")
 
@@ -554,6 +561,10 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
     if update and hasattr(update, 'message') and update.message:
         await update.message.reply_text("An error occurred. Please try again later.")
 
+async def clean_old_listings_job(context: ContextTypes.DEFAULT_TYPE):
+    clean_old_listings()
+    logger.info("Old listings cleaned from the database.")
+
 
 def main():
     district_name_to_id = fetch_districts()
@@ -597,8 +608,9 @@ def main():
     application.add_error_handler(error_handler)
 
     # Schedule the global job
-    application.job_queue.run_repeating(global_check_new_listings, interval=10, first=0)
-
+    application.job_queue.run_repeating(global_check_new_listings, interval=300, first=0)
+    # Schedule the cleaning job to run every day at midnight
+    application.job_queue.run_daily(clean_old_listings_job, time=datetime.time(hour=0, minute=0, second=0))
     application.run_polling()
 
 

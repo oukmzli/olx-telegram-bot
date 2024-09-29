@@ -95,6 +95,7 @@ def fetch_listings(filters):
         if pushup_time_str:
             try:
                 listing_time = parse_date(pushup_time_str)
+                listing['listing_time'] = listing_time
             except Exception as e:
                 logger.error(f"Error parsing pushup_time: {e}")
                 continue
@@ -103,7 +104,7 @@ def fetch_listings(filters):
 
         now = datetime.datetime.now(datetime.timezone.utc)
         age = now - listing_time
-        if age > datetime.timedelta(days=2):
+        if age > datetime.timedelta(days=1):
             continue
 
         parsed_listings.append(listing)

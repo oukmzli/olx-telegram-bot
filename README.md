@@ -70,8 +70,14 @@ This bot monitors OLX for new apartment listings in Krakow and notifies users vi
    docker build -t olx-telegram-bot .
    ```
 
-2. **Run the Docker container:**
+2. **Run the Docker container with database volume and environment variable:**
 
    ```bash
-   docker run -d --name olx-bot --env TELEGRAM_BOT_TOKEN=your_bot_token_here olx-telegram-bot
+   docker run -d \
+   --name olx-bot \
+   --env TELEGRAM_BOT_TOKEN=your_bot_token_here \
+   -v /path/on/host/listings.db:/app/listings.db \
+   olx-telegram-bot
    ```
+   Replace /path/on/host/listings.db with the actual path on your host machine where you want to store the database.
+

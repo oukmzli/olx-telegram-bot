@@ -19,7 +19,10 @@ def init_db():
                     user_id INTEGER PRIMARY KEY,
                     min_price INTEGER,
                     max_price INTEGER,
-                    districts TEXT
+                    districts TEXT,
+                    is_active INTEGER DEFAULT 0,
+                    from_owner INTEGER DEFAULT 0,
+                    use_total_price INTEGER DEFAULT 0
                 )
             ''')
             c.execute('''
@@ -42,13 +45,19 @@ def get_user_filters(user_id):
         try:
             conn = sqlite3.connect(DB_NAME)
             c = conn.cursor()
-            c.execute('SELECT min_price, max_price, districts FROM users WHERE user_id=?', (user_id,))
+            c.execute('SELECT min_price, max_price, districts, from_owner, use_total_price FROM users WHERE user_id=?', (user_id,))
             result = c.fetchone()
             if result:
-                min_price, max_price, districts = result
+                min_price, max_price, districts, from_owner, use_total_price = result
                 districts = districts.split(',') if districts else []
                 districts = [d.strip() for d in districts if d.strip()]
-                return {'min_price': min_price, 'max_price': max_price, 'districts': districts}
+                return {
+                    'min_price': min_price,
+                    'max_price': max_price,
+                    'districts': districts,
+                    'from_owner': bool(from_owner),
+                    'use_total_price': bool(use_total_price)
+                }
             else:
                 return None
         except sqlite3.Error as e:
@@ -57,7 +66,7 @@ def get_user_filters(user_id):
         finally:
             conn.close()
 
-def set_user_filters(user_id, min_price=None, max_price=None, districts=None):
+def set_user_filters(user_id, min_price=None, max_price=None, districts=None, from_owner=None, use_total_price=None):
     with db_lock:
         try:
             conn = sqlite3.connect(DB_NAME)
@@ -76,18 +85,25 @@ def set_user_filters(user_id, min_price=None, max_price=None, districts=None):
                     districts_str = ','.join(districts)
                     updates.append('districts=?')
                     params.append(districts_str)
+                if from_owner is not None:
+                    updates.append('from_owner=?')
+                    params.append(int(from_owner))
+                if use_total_price is not None:
+                    updates.append('use_total_price=?')
+                    params.append(int(use_total_price))
                 params.append(user_id)
                 sql = 'UPDATE users SET ' + ', '.join(updates) + ' WHERE user_id=?'
                 c.execute(sql, params)
             else:
                 districts_str = ','.join(districts) if districts else ''
-                c.execute('INSERT INTO users (user_id, min_price, max_price, districts) VALUES (?, ?, ?, ?)',
-                          (user_id, min_price, max_price, districts_str))
+                c.execute('INSERT INTO users (user_id, min_price, max_price, districts, is_active, from_owner, use_total_price) VALUES (?, ?, ?, ?, 0, ?, ?)',
+                          (user_id, min_price, max_price, districts_str, int(from_owner or 0), int(use_total_price or 0)))
             conn.commit()
         except sqlite3.Error as e:
             logger.error(f"Database error when setting user filters: {e}")
         finally:
             conn.close()
+
 
 def reset_user_filters(user_id):
     with db_lock:
@@ -106,7 +122,7 @@ def has_user_received_listing(user_id, listing_id):
         try:
             conn = sqlite3.connect(DB_NAME)
             c = conn.cursor()
-            c.execute('SELECT id FROM sent_listings WHERE user_id=? AND listing_id=?', (user_id, listing_id))
+            c.execute('SELECT id FROM sent_listings WHERE user_id=? AND listing_id=? AND sent_at > datetime("now", "-2 days")', (user_id, listing_id))
             result = c.fetchone()
             return result is not None
         except sqlite3.Error as e:
@@ -136,5 +152,31 @@ def clean_old_sent_listings():
             conn.commit()
         except sqlite3.Error as e:
             logger.error(f"Database error when cleaning old sent listings: {e}")
+        finally:
+            conn.close()
+
+def set_user_active(user_id, is_active):
+    with db_lock:
+        try:
+            conn = sqlite3.connect(DB_NAME)
+            c = conn.cursor()
+            c.execute('UPDATE users SET is_active=? WHERE user_id=?', (int(is_active), user_id))
+            conn.commit()
+        except sqlite3.Error as e:
+            logger.error(f"Database error when setting user active status: {e}")
+        finally:
+            conn.close()
+
+def get_active_users():
+    with db_lock:
+        try:
+            conn = sqlite3.connect(DB_NAME)
+            c = conn.cursor()
+            c.execute('SELECT user_id FROM users WHERE is_active=1')
+            result = c.fetchall()
+            return [row[0] for row in result]
+        except sqlite3.Error as e:
+            logger.error(f"Database error when fetching active users: {e}")
+            return []
         finally:
             conn.close()

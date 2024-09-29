@@ -21,11 +21,17 @@ def fetch_listings(filters):
 
     if filters.get('min_price'):
         params['filter_float_price:from'] = filters['min_price']
+    else:
+        params.pop('filter_float_price:from', None)
     if filters.get('max_price'):
         params['filter_float_price:to'] = filters['max_price']
+    else:
+        params.pop('filter_float_price:to', None)
 
     if filters.get('district_ids'):
         params['district_id'] = filters['district_ids']
+    else:
+        params.pop('district_id', None)
 
     headers = {
         "User-Agent": "Mozilla/5.0"
@@ -82,7 +88,7 @@ def fetch_listings(filters):
 
         district_data = item.get('location', {}).get('district', {})
         if district_data:
-            listing['district_id'] = district_data.get('id', 'N/A')
+            listing['district_id'] = str(district_data.get('id', 'N/A'))
             listing['district_name'] = district_data.get('name', 'N/A')
 
         pushup_time_str = item.get('pushup_time')
@@ -107,23 +113,23 @@ def fetch_listings(filters):
 
 def fetch_districts():
     district_name_to_id = {
-        'dębniki': '261',
-        'bieżanów-prokocim': '281',
-        'bieńczyce': '285',
+        'debniki': '261',
+        'biezanow-prokocim': '281',
+        'bienczyce': '285',
         'bronowice': '253',
-        'czyżyny': '283',
-        'grzegórzki': '279',
+        'czyzyny': '283',
+        'grzegorzki': '279',
         'krowodrza': '255',
-        'łagiewniki-borek fałęcki': '259',
+        'lagiewniki-borek falecki': '259',
         'mistrzejowice': '289',
         'nowa huta': '287',
-        'podgórze': '263',
-        'podgórze duchackie': '277',
-        'prądnik biały': '275',
-        'prądnik czerwony': '267',
+        'podgorze': '263',
+        'podgorze duchackie': '277',
+        'pradnik bialy': '275',
+        'pradnik czerwony': '267',
         'stare miasto': '273',
         'swoszowice': '269',
-        'wzgórza krzesławickie': '291',
+        'wzgorza krzeslawickie': '291',
         'zwierzyniec': '257'
     }
 

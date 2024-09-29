@@ -1,0 +1,21 @@
+# .gitignore
+
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Database file
+listings.db
+
+# Environment variables
+.env
+
+# Logs and temp files
+*.log
+*.pid
+*.seed
+
+# Docker
+*.log
+*.pid

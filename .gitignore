@@ -1,5 +1,3 @@
-# .gitignore
-
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
@@ -15,7 +13,58 @@ listings.db
 *.log
 *.pid
 *.seed
+*.tmp
+*.temp
 
 # Docker
+docker-compose.override.yml
 *.log
 *.pid
+
+# Virtual environment
+venv/
+.env/
+*.env
+
+# IDE-specific files (e.g. PyCharm, IntelliJ IDEA)
+.idea/
+.vscode/
+*.iml
+
+# macOS-specific files
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Windows-specific files
+Thumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# Linux-specific files
+.Trash-*
+
+# Backup files
+*.bak
+*.swp
+*.swo
+*.old
+*.orig
+
+# Coverage reports
+htmlcov/
+.coverage
+.coverage.*
+.cache
+
+# Test results
+.pytest_cache/
+junit-xml/
+test-results.xml
+
+# MyPy
+.mypy_cache/
+
+# Temporary files
+*.tmp
+*.temp

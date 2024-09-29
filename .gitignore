@@ -29,7 +29,7 @@ venv/
 *.env
 
 # IDE-specific files (e.g. PyCharm, IntelliJ IDEA)
-.idea/
+.idea
 .vscode/
 *.iml
 

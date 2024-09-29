@@ -6,14 +6,16 @@ import os
 from dotenv import load_dotenv
 from telegram import Update
 from telegram.ext import (
-    ApplicationBuilder, CommandHandler, ContextTypes, ConversationHandler, MessageHandler, filters
+    ApplicationBuilder, CommandHandler, ContextTypes, ConversationHandler, MessageHandler, CallbackQueryHandler, filters, JobQueue
 )
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 from db import init_db, get_user_filters, set_user_filters, reset_user_filters
 from db import has_user_received_listing, mark_listing_as_sent
 from olx_api import fetch_listings, fetch_districts
 from telegram.helpers import escape_markdown
 import difflib
 from bs4 import BeautifulSoup
+from unidecode import unidecode
 
 load_dotenv()
 TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
@@ -47,7 +49,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         set_user_filters(user_id, min_price=None, max_price=None, districts=[])
 
     await update.message.reply_text(
-        "Welcome to the OLX Apartment Bot! Use the /help command to see available options."
+        "Welcome to the OLX Apartment Bot! Use the /help command to see available options, or simply use /search to start."
     )
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -55,13 +57,14 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Available commands:\n"
         "/start - Start the bot and show the main menu.\n"
         "/help - Show available commands.\n"
+        "/search - Start searching for new listings.\n"
+        "/stop - Stop searching for new listings.\n"
         "/setprice - Set the price range.\n"
+        "/listdistricts - Table with all avaliable districts.\n"
         "/addlocation - Add a district to search.\n"
         "/removelocation - Remove a district from the search.\n"
         "/getfilters - Show current filters.\n"
-        "/resetfilters - Reset all filters to default.\n"
-        "/search - Start searching for new listings.\n"
-        "/stop - Stop searching for new listings."
+        "/resetfilters - Reset all filters to default."
     )
     await update.message.reply_text(help_text)
 
@@ -107,7 +110,7 @@ async def add_location_command(update: Update, context: ContextTypes.DEFAULT_TYP
 
 async def add_location(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    input_text = update.message.text.lower()
+    input_text = unidecode(update.message.text.lower())  # Убираем польские символы
     district_names = [d.strip() for d in input_text.split(',')]
     district_name_to_id = context.bot_data.get('district_name_to_id', {})
 
@@ -115,8 +118,9 @@ async def add_location(update: Update, context: ContextTypes.DEFAULT_TYPE):
     invalid_districts = []
 
     for district in district_names:
-        if district in district_name_to_id:
-            district_id = district_name_to_id[district]
+        normalized_district = unidecode(district)  # Нормализуем введенное название
+        if normalized_district in district_name_to_id:
+            district_id = district_name_to_id[normalized_district]
             filters = get_user_filters(user_id)
             if district_id not in filters['districts']:
                 filters['districts'].append(district_id)
@@ -133,7 +137,7 @@ async def add_location(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if invalid_districts:
         suggestions = []
         for invalid_district in invalid_districts:
-            matches = difflib.get_close_matches(invalid_district.lower(), district_name_to_id.keys(), n=3, cutoff=0.6)
+            matches = difflib.get_close_matches(unidecode(invalid_district), district_name_to_id.keys(), n=3, cutoff=0.6)
             if matches:
                 suggestions.append(f"{invalid_district}: {', '.join([m.title() for m in matches])}")
             else:
@@ -275,20 +279,47 @@ async def check_new_listings(context: ContextTypes.DEFAULT_TYPE):
         logger.error(f"Error in check_new_listings: {e}")
         await context.bot.send_message(chat_id=user_id, text="An error occurred while checking for new listings.")
 
+
 async def start_search(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     current_jobs = context.job_queue.get_jobs_by_name(str(user_id))
     if current_jobs:
         await update.message.reply_text("Search is already running.")
         return
+
+    await check_new_listings_now(context, user_id)
+
     context.job_queue.run_repeating(
         check_new_listings,
-        interval=10,  # check every 5 minutes
-        first=0,
+        interval=300,  # check each 5 minutes
+        first=300,
         data={'user_id': user_id},
         name=str(user_id)
     )
     await update.message.reply_text("Started searching for new listings.")
+
+async def check_new_listings_now(context: ContextTypes.DEFAULT_TYPE, user_id: int):
+    try:
+        filters = get_user_filters(user_id)
+        if filters is None:
+            return
+        search_filters = {
+            'min_price': filters['min_price'],
+            'max_price': filters['max_price'],
+            'district_ids': filters['districts']
+        }
+        listings = fetch_listings(search_filters)
+        if not listings:
+            await context.bot.send_message(chat_id=user_id, text="No new listings found matching your criteria.")
+            return
+        for listing in listings:
+            listing_id = listing['id']
+            if not has_user_received_listing(user_id, listing_id):
+                await send_listing(context, user_id, listing)
+                mark_listing_as_sent(user_id, listing_id)
+    except Exception as e:
+        logger.error(f"Error in check_new_listings_now: {e}")
+        await context.bot.send_message(chat_id=user_id, text="An error occurred while checking for new listings.")
 
 async def stop_search(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -299,6 +330,104 @@ async def stop_search(update: Update, context: ContextTypes.DEFAULT_TYPE):
     for job in current_jobs:
         job.schedule_removal()
     await update.message.reply_text("Stopped searching for new listings.")
+
+# Constants for pagination
+ITEMS_PER_PAGE = 10
+async def list_districts(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    district_name_to_id = context.bot_data.get('district_name_to_id', {})
+
+    if not district_name_to_id:
+        await update.message.reply_text("No districts found. Please try again later.")
+        return
+
+    # Проверка количества районов
+    logger.info(f"Total districts: {len(district_name_to_id)}")
+
+    page = int(context.args[0]) if context.args else 0  # Get the current page, default is 0
+    total_pages = (len(district_name_to_id) + ITEMS_PER_PAGE - 1) // ITEMS_PER_PAGE
+    logger.info(f"Current page: {page}, Total pages: {total_pages}")
+
+    if page < 0 or page >= total_pages:
+        await update.message.reply_text(f"Invalid page number. Total pages available: {total_pages}.")
+        return
+
+    # Create buttons for each district (2 per line)
+    districts = list(district_name_to_id.items())
+    start_idx = page * ITEMS_PER_PAGE
+    end_idx = start_idx + ITEMS_PER_PAGE
+    page_districts = districts[start_idx:end_idx]
+
+    keyboard = []
+    for i in range(0, len(page_districts), 2):
+        row = []
+        for district_name, district_id in page_districts[i:i + 2]:
+            row.append(InlineKeyboardButton(district_name.title(), callback_data=f"add_district_{district_id}"))
+        keyboard.append(row)
+
+    # Add pagination buttons if necessary
+    navigation_buttons = []
+    if page > 0:
+        navigation_buttons.append(InlineKeyboardButton("⬅️ Previous", callback_data=f"page_{page - 1}"))
+    if end_idx < len(districts):
+        navigation_buttons.append(InlineKeyboardButton("Next ➡️", callback_data=f"page_{page + 1}"))
+
+    if navigation_buttons:
+        keyboard.append(navigation_buttons)
+
+    # Add the 'Close' button
+    keyboard.append([InlineKeyboardButton("Close", callback_data="close_menu")])
+
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    new_text = f"Choose a district to add it to your filters (Page {page + 1}/{total_pages}):"  # Добавляем номер страницы в текст
+
+    # Handle different types of updates (message or callback query)
+    if update.message:
+        await update.message.reply_text(new_text, reply_markup=reply_markup)
+    elif update.callback_query and update.callback_query.message:
+        current_text = update.callback_query.message.text
+        current_markup = update.callback_query.message.reply_markup
+
+        # Проверка на изменение разметки или текста
+        if current_text != new_text or current_markup != reply_markup:
+            await update.callback_query.message.edit_text(new_text, reply_markup=reply_markup)
+        else:
+            logger.info("Message content and markup are the same. No update needed.")
+
+
+async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+
+    # Handle closing the menu
+    if query.data == "close_menu":
+        await query.edit_message_text("Menu closed.")
+        return
+
+    # Handle pagination (если нажаты кнопки "Previous" или "Next")
+    if query.data.startswith("page_"):
+        page = int(query.data.split("_")[1])
+
+        # Передаем номер страницы в качестве аргумента
+        context.args = [str(page)]
+        await list_districts(update, context)
+        return
+
+    user_id = query.from_user.id
+    district_id = query.data.split("_")[-1]  # Extract district_id from callback_data
+
+    # Get the current user filters
+    filters = get_user_filters(user_id)
+    if district_id not in filters['districts']:
+        filters['districts'].append(district_id)
+        set_user_filters(user_id, min_price=filters['min_price'], max_price=filters['max_price'],
+                         districts=filters['districts'])
+        await query.message.reply_text(f"District has been successfully added to your filters.")
+    else:
+        await query.message.reply_text(f"District is already in your filters.")
+
+    # Re-display the buttons after adding the district
+    await list_districts(update, context)
+
 
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
     logger.error("Exception while handling an update:", exc_info=context.error)
@@ -322,6 +451,9 @@ def main():
     application.add_handler(CommandHandler('resetfilters', reset_filters))
     application.add_handler(CommandHandler('search', start_search))
     application.add_handler(CommandHandler('stop', stop_search))
+    application.add_handler(
+        CommandHandler('listdistricts', list_districts))  # Add the handler for the list districts command
+    application.add_handler(CallbackQueryHandler(button_handler))  # Handle inline button clicks (including pagination)
 
     conv_handler = ConversationHandler(
         entry_points=[

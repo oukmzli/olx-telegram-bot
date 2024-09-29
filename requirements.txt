@@ -5,3 +5,4 @@ python-telegram-bot==20.3
 python-dotenv
 python-dateutil
 beautifulsoup4
+unidecode

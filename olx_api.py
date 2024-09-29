@@ -8,29 +8,22 @@ import logging
 logger = logging.getLogger(__name__)
 
 def fetch_listings(filters):
-    """
-    fetch listings from OLX based on the provided filters
-    :param filters: dictionary with keys 'min_price', 'max_price', 'district_ids'
-    :return: list of parsed listings
-    """
     url = "https://www.olx.pl/api/v1/offers/"
     params = {
         "offset": 0,
         "limit": 50,
-        "category_id": 15,  # Flats for rent
-        "region_id": 4,     # Malopolskie region
-        "city_id": 8959,    # Krakow
+        "category_id": 15,
+        "region_id": 4,
+        "city_id": 8959,
         "sort_by": "created_at:desc",
         "filter_refiners": "spell_checker"
     }
 
-    # Add price filters
     if filters.get('min_price'):
         params['filter_float_price:from'] = filters['min_price']
     if filters.get('max_price'):
         params['filter_float_price:to'] = filters['max_price']
 
-    # Add district filters
     if filters.get('district_ids'):
         params['district_id'] = filters['district_ids']
 
@@ -43,6 +36,9 @@ def fetch_listings(filters):
         response.raise_for_status()
     except requests.RequestException as e:
         logger.error(f"Error fetching listings: {e}")
+        return []
+    except Exception as e:
+        logger.exception("Unexpected error occurred while fetching listings.")
         return []
 
     data = response.json()
@@ -99,7 +95,6 @@ def fetch_listings(filters):
         else:
             continue
 
-        # check if the listing is within the last 2 days
         now = datetime.datetime.now(datetime.timezone.utc)
         age = now - listing_time
         if age > datetime.timedelta(days=2):
@@ -110,15 +105,26 @@ def fetch_listings(filters):
     logger.debug(f"Fetched {len(parsed_listings)} valid listings from OLX")
     return parsed_listings
 
-
 def fetch_districts():
     district_name_to_id = {
+        'dębniki': '261',
+        'bieżanów-prokocim': '281',
+        'bieńczyce': '285',
+        'bronowice': '253',
+        'czyżyny': '283',
+        'grzegórzki': '279',
         'krowodrza': '255',
+        'łagiewniki-borek fałęcki': '259',
+        'mistrzejowice': '289',
         'nowa huta': '287',
         'podgórze': '263',
-        'zwierzyniec': '257',
-        'dębniki': '261',
-        'stare miasto': '273'
+        'podgórze duchackie': '277',
+        'prądnik biały': '275',
+        'prądnik czerwony': '267',
+        'stare miasto': '273',
+        'swoszowice': '269',
+        'wzgórza krzesławickie': '291',
+        'zwierzyniec': '257'
     }
 
     return district_name_to_id

@@ -13,7 +13,7 @@ from db import (
     init_db, get_user_filters, set_user_filters, reset_user_filters,
     has_user_received_listing, mark_listing_as_sent, set_user_active,
     get_active_users, save_listings_to_db, get_listings_from_db,
-    clean_old_listings
+    clean_old_listings, get_latest_listing_time
 )
 from olx_api import fetch_listings, fetch_districts
 from telegram.helpers import escape_markdown
@@ -118,98 +118,14 @@ async def set_max_price(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def add_location_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # await update.message.reply_text("Please enter the district names you want to add (separated by commas):")
-    # return ADD_LOCATION
     await update.message.reply_text("Please use /listdistricts to add or remove locations using the interactive menu.")
     return ConversationHandler.END
 
-
-# async def add_location(update: Update, context: ContextTypes.DEFAULT_TYPE):
-#     user_id = update.effective_user.id
-#     input_text = unidecode(update.message.text.lower())
-#     district_names = [d.strip() for d in input_text.split(',')]
-#     district_name_to_id = context.bot_data.get('district_name_to_id', {})
-#
-#     added_districts = []
-#     invalid_districts = []
-#
-#     for district in district_names:
-#         normalized_district = unidecode(district)
-#         if normalized_district in district_name_to_id:
-#             district_id = district_name_to_id[normalized_district]
-#             filters = get_user_filters(user_id)
-#             if district_id not in filters['districts']:
-#                 filters['districts'].append(district_id)
-#                 set_user_filters(user_id, min_price=filters['min_price'], max_price=filters['max_price'],
-#                                  districts=filters['districts'])
-#                 added_districts.append(district.title())
-#             else:
-#                 continue
-#         else:
-#             invalid_districts.append(district.title())
-#
-#     if added_districts:
-#         await update.message.reply_text(f"Added locations: {', '.join(added_districts)}")
-#     if invalid_districts:
-#         suggestions = []
-#         for invalid_district in invalid_districts:
-#             matches = difflib.get_close_matches(unidecode(invalid_district), district_name_to_id.keys(), n=3, cutoff=0.6)
-#             if matches:
-#                 suggestions.append(f"{invalid_district}: {', '.join([m.title() for m in matches])}")
-#             else:
-#                 suggestions.append(f"{invalid_district}: No suggestions")
-#
-#         await update.message.reply_text(
-#             "Some districts were not recognized:\n" + "\n".join(suggestions)
-#         )
-#     return ConversationHandler.END
 
 async def remove_location_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # await update.message.reply_text("Please enter the district names you want to remove (separated by commas):")
-    # return REMOVE_LOCATION
     await update.message.reply_text("Please use /listdistricts to add or remove locations using the interactive menu.")
     return ConversationHandler.END
 
-
-# async def remove_location(update: Update, context: ContextTypes.DEFAULT_TYPE):
-#     user_id = update.effective_user.id
-#     input_text = unidecode(update.message.text.lower())
-#     district_names = [d.strip() for d in input_text.split(',')]
-#     district_name_to_id = context.bot_data.get('district_name_to_id', {})
-#
-#     removed_districts = []
-#     invalid_districts = []
-#
-#     for district in district_names:
-#         normalized_district = unidecode(district)
-#         district_id = district_name_to_id.get(normalized_district)
-#         if district_id:
-#             filters = get_user_filters(user_id)
-#             if district_id in filters['districts']:
-#                 filters['districts'].remove(district_id)
-#                 set_user_filters(user_id, min_price=filters['min_price'], max_price=filters['max_price'],
-#                                  districts=filters['districts'])
-#                 removed_districts.append(district.title())
-#             else:
-#                 invalid_districts.append(district.title())
-#         else:
-#             invalid_districts.append(district.title())
-#
-#     if removed_districts:
-#         await update.message.reply_text(f"Removed locations: {', '.join(removed_districts)}")
-#     if invalid_districts:
-#         suggestions = []
-#         for invalid_district in invalid_districts:
-#             matches = difflib.get_close_matches(unidecode(invalid_district), district_name_to_id.keys(), n=3, cutoff=0.6)
-#             if matches:
-#                 suggestions.append(f"{invalid_district}: {', '.join([m.title() for m in matches])}")
-#             else:
-#                 suggestions.append(f"{invalid_district}: No suggestions")
-#
-#         await update.message.reply_text(
-#             "Some districts were not recognized or not in your filters:\n" + "\n".join(suggestions)
-#         )
-#     return ConversationHandler.END
 
 async def reset_filters(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -375,7 +291,7 @@ def filter_listings_for_user(listings, filters):
 async def global_check_new_listings(context: ContextTypes.DEFAULT_TYPE):
     try:
         active_user_ids = get_active_users()
-        # Fetch listings once
+        # Fetch latest listings
         listings = fetch_listings({})
         if not listings:
             logger.info("No new listings found.")
@@ -396,6 +312,7 @@ async def global_check_new_listings(context: ContextTypes.DEFAULT_TYPE):
                 if not has_user_received_listing(user_id, listing_id):
                     await send_listing(context, user_id, listing)
                     mark_listing_as_sent(user_id, listing_id)
+                    await asyncio.sleep(1)
     except Exception as e:
         logger.error(f"Error in global_check_new_listings: {e}")
 
@@ -546,10 +463,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         set_user_filters(user_id, min_price=filters['min_price'], max_price=filters['max_price'],
                          districts=user_districts)
 
-        # Send feedback to the user
-        # district_name = next((name for name, id in district_name_to_id.items() if id == district_id), "Unknown")
-        # await query.message.reply_text(f"District '{district_name.title()}' has been {action} your filters.")
-
         # Refresh the menu
         context.args = [str(page)]
         await list_districts(update, context)
@@ -597,8 +510,6 @@ def main():
         states={
             SET_MIN_PRICE: [MessageHandler(filters.TEXT & ~filters.COMMAND, set_min_price)],
             SET_MAX_PRICE: [MessageHandler(filters.TEXT & ~filters.COMMAND, set_max_price)],
-            # ADD_LOCATION: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_location)],
-            # REMOVE_LOCATION: [MessageHandler(filters.TEXT & ~filters.COMMAND, remove_location)],
         },
         fallbacks=[CommandHandler('cancel', lambda u, c: ConversationHandler.END)],
     )
@@ -608,11 +519,10 @@ def main():
     application.add_error_handler(error_handler)
 
     # Schedule the global job
-    application.job_queue.run_repeating(global_check_new_listings, interval=300, first=0)
+    application.job_queue.run_repeating(global_check_new_listings, interval=10, first=0)  # Every 5 minutes
     # Schedule the cleaning job to run every day at midnight
     application.job_queue.run_daily(clean_old_listings_job, time=datetime.time(hour=0, minute=0, second=0))
     application.run_polling()
-
 
 if __name__ == '__main__':
     main()

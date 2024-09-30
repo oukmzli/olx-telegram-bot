@@ -24,6 +24,7 @@ import datetime
 
 load_dotenv()
 TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
+last_listing_time = None
 
 # Initialize the database before any database access
 init_db()
@@ -373,33 +374,38 @@ def filter_listings_for_user(listings, filters):
 
 
 async def global_check_new_listings(context: ContextTypes.DEFAULT_TYPE):
+    global last_listing_time
     try:
         active_user_ids = get_active_users()
-        # Fetch listings once
-        listings = fetch_listings({})
-        if not listings:
+
+        # Fetch listings with the time filter to avoid duplicates
+        plistings, last_fetched_time = fetch_listings({}, time_filter=last_listing_time)
+
+        if not plistings:
             logger.info("No new listings found.")
             return
 
+        # Update the last_listing_time to avoid fetching duplicates in the next run
+        last_listing_time = last_fetched_time
+
         # Save fetched listings to the database
-        save_listings_to_db(listings)
+        save_listings_to_db(plistings)
 
         for user_id in active_user_ids:
             filters = get_user_filters(user_id)
             if filters is None:
                 continue
 
-            user_listings = filter_listings_for_user(listings, filters)
+            user_listings = filter_listings_for_user(plistings, filters)
 
             for listing in user_listings:
                 listing_id = listing['id']
                 if not has_user_received_listing(user_id, listing_id):
                     await send_listing(context, user_id, listing)
                     mark_listing_as_sent(user_id, listing_id)
+
     except Exception as e:
         logger.error(f"Error in global_check_new_listings: {e}")
-
-
 
 async def start_search(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -608,7 +614,7 @@ def main():
     application.add_error_handler(error_handler)
 
     # Schedule the global job
-    application.job_queue.run_repeating(global_check_new_listings, interval=300, first=0)
+    application.job_queue.run_repeating(global_check_new_listings, interval=10, first=0)
     # Schedule the cleaning job to run every day at midnight
     application.job_queue.run_daily(clean_old_listings_job, time=datetime.time(hour=0, minute=0, second=0))
     application.run_polling()

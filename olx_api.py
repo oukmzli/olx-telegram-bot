@@ -7,7 +7,8 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-def fetch_listings(filters):
+
+def fetch_listings(filters, time_filter=None):
     url = "https://www.olx.pl/api/v1/offers/"
     params = {
         "offset": 0,
@@ -15,8 +16,7 @@ def fetch_listings(filters):
         "category_id": 15,
         "region_id": 4,
         "city_id": 8959,
-        "sort_by": "created_at:desc",
-        "filter_refiners": "spell_checker"
+        "sort_by": "created_at:desc"
     }
 
     if filters.get('min_price'):
@@ -42,16 +42,35 @@ def fetch_listings(filters):
         response.raise_for_status()
     except requests.RequestException as e:
         logger.error(f"Error fetching listings: {e}")
-        return []
+        return [], None  # Return empty list and None in case of error
     except Exception as e:
         logger.exception("Unexpected error occurred while fetching listings.")
-        return []
+        return [], None
 
     data = response.json()
     listings = data.get('data', [])
 
     parsed_listings = []
+    last_listing_time = None
+
     for item in listings:
+        pushup_time_str = item.get('pushup_time')
+
+        # Check if pushup_time exists and is after time_filter
+        if pushup_time_str:
+            try:
+                listing_time = parse_date(pushup_time_str)
+            except Exception as e:
+                logger.error(f"Error parsing pushup_time: {e}")
+                continue
+        else:
+            continue
+
+        # Check if the listing is after the provided time filter
+        if time_filter and listing_time <= time_filter:
+            continue  # Skip listings older than the time_filter
+
+        # Now proceed with parsing the listing data
         listing = {
             'id': str(item.get('id')),
             'title': item.get('title'),
@@ -91,26 +110,18 @@ def fetch_listings(filters):
             listing['district_id'] = str(district_data.get('id', 'N/A'))
             listing['district_name'] = district_data.get('name', 'N/A')
 
-        pushup_time_str = item.get('pushup_time')
-        if pushup_time_str:
-            try:
-                listing_time = parse_date(pushup_time_str)
-                listing['listing_time'] = listing_time
-            except Exception as e:
-                logger.error(f"Error parsing pushup_time: {e}")
-                continue
-        else:
-            continue
-
-        now = datetime.datetime.now(datetime.timezone.utc)
-        age = now - listing_time
-        if age > datetime.timedelta(days=1):
-            continue
-
+        listing['listing_time'] = listing_time
         parsed_listings.append(listing)
 
+        # Track the most recent listing time
+        if not last_listing_time or listing_time > last_listing_time:
+            last_listing_time = listing_time
+
     logger.debug(f"Fetched {len(parsed_listings)} valid listings from OLX")
-    return parsed_listings
+    return parsed_listings, last_listing_time
+
+
+
 
 def fetch_districts():
     district_name_to_id = {

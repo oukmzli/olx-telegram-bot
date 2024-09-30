@@ -17,26 +17,21 @@ def fetch_listings(filters, time_filter=None):
         "region_id": 4,
         "city_id": 8959,
         "sort_by": "created_at:desc"
+
     }
 
+    # Apply filters
     if filters.get('min_price'):
         params['filter_float_price:from'] = filters['min_price']
-    else:
-        params.pop('filter_float_price:from', None)
     if filters.get('max_price'):
         params['filter_float_price:to'] = filters['max_price']
-    else:
-        params.pop('filter_float_price:to', None)
-
     if filters.get('district_ids'):
         params['district_id'] = filters['district_ids']
-    else:
-        params.pop('district_id', None)
 
     headers = {
         "User-Agent": "Mozilla/5.0"
     }
-
+    
     try:
         response = requests.get(url, params=params, headers=headers, timeout=10)
         response.raise_for_status()
@@ -119,7 +114,6 @@ def fetch_listings(filters, time_filter=None):
 
     logger.debug(f"Fetched {len(parsed_listings)} valid listings from OLX")
     return parsed_listings, last_listing_time
-
 
 
 

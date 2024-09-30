@@ -56,6 +56,13 @@ def init_db():
                         listing_time TIMESTAMP
                     )
                 ''')
+            c.execute('''
+                        CREATE TABLE IF NOT EXISTS listing_log (
+                            id INTEGER PRIMARY KEY AUTOINCREMENT,
+                            listing_id TEXT,
+                            added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                        )
+                ''')
             conn.commit()
         except sqlite3.Error as e:
             logger.error(f"Database error during initialization: {e}")
@@ -170,7 +177,7 @@ def clean_old_listings():
         try:
             conn = sqlite3.connect(DB_NAME)
             c = conn.cursor()
-            c.execute('DELETE FROM listings WHERE listing_time < datetime("now", "-2 days")')
+            c.execute('DELETE FROM listings WHERE listing_time < datetime("now", "-1 days")')
             conn.commit()
         except sqlite3.Error as e:
             logger.error(f"Database error when cleaning old listings: {e}")
@@ -209,31 +216,34 @@ def save_listings_to_db(listings):
             conn = sqlite3.connect(DB_NAME)
             c = conn.cursor()
             for listing in listings:
-                c.execute('''
-                    INSERT OR REPLACE INTO listings (
-                        id, title, url, price, rent_additional, location,
-                        region_id, region_name, region_normalized_name,
-                        district_id, district_name, area, rooms,
-                        is_business, description, listing_time
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ''', (
-                    listing.get('id'),
-                    listing.get('title'),
-                    listing.get('url'),
-                    listing.get('price'),
-                    listing.get('rent_additional'),
-                    listing.get('location'),
-                    listing.get('region_id'),
-                    listing.get('region_name'),
-                    listing.get('region_normalized_name'),
-                    listing.get('district_id'),
-                    listing.get('district_name'),
-                    listing.get('area'),
-                    listing.get('rooms'),
-                    int(listing.get('is_business', False)),
-                    listing.get('description'),
-                    listing.get('listing_time').isoformat() if listing.get('listing_time') else None
-                ))
+                c.execute('SELECT 1 FROM listings WHERE id=?', (listing.get('id'),))
+                if not c.fetchone():
+                    c.execute('''
+                        INSERT INTO listings (
+                            id, title, url, price, rent_additional, location,
+                            region_id, region_name, region_normalized_name,
+                            district_id, district_name, area, rooms,
+                            is_business, description, listing_time
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ''', (
+                        listing.get('id'),
+                        listing.get('title'),
+                        listing.get('url'),
+                        listing.get('price'),
+                        listing.get('rent_additional'),
+                        listing.get('location'),
+                        listing.get('region_id'),
+                        listing.get('region_name'),
+                        listing.get('region_normalized_name'),
+                        listing.get('district_id'),
+                        listing.get('district_name'),
+                        listing.get('area'),
+                        listing.get('rooms'),
+                        int(listing.get('is_business', False)),
+                        listing.get('description'),
+                        listing.get('listing_time').isoformat() if listing.get('listing_time') else None
+                    ))
+                    c.execute('INSERT INTO listing_log (listing_id) VALUES (?)', (listing.get('id'),))
             conn.commit()
         except sqlite3.Error as e:
             logger.error(f"Database error when saving listings: {e}")
@@ -246,7 +256,7 @@ def get_listings_from_db():
             conn = sqlite3.connect(DB_NAME)
             conn.row_factory = sqlite3.Row
             c = conn.cursor()
-            c.execute('SELECT * FROM listings WHERE listing_time > datetime("now", "-2 days")')
+            c.execute('SELECT * FROM listings WHERE listing_time > datetime("now", "-1 days")')
             rows = c.fetchall()
             listings = []
             for row in rows:
@@ -260,5 +270,36 @@ def get_listings_from_db():
         except sqlite3.Error as e:
             logger.error(f"Database error when fetching listings: {e}")
             return []
+        finally:
+            conn.close()
+
+def get_new_listings_count():
+    with db_lock:
+        try:
+            conn = sqlite3.connect(DB_NAME)
+            c = conn.cursor()
+            c.execute('SELECT COUNT(*) FROM listing_log')
+            count = c.fetchone()[0]
+            return count
+        except sqlite3.Error as e:
+            logger.error(f"Database error when counting new listings: {e}")
+            return 0
+        finally:
+            conn.close()
+
+def get_latest_listing_time():
+    with db_lock:
+        try:
+            conn = sqlite3.connect(DB_NAME)
+            c = conn.cursor()
+            c.execute('SELECT MAX(listing_time) FROM listings')
+            result = c.fetchone()
+            if result and result[0]:
+                return dateutil.parser.parse(result[0])
+            else:
+                return None
+        except sqlite3.Error as e:
+            logger.error(f"Database error when getting latest listing time: {e}")
+            return None
         finally:
             conn.close()
